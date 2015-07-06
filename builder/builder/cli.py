@@ -15,7 +15,14 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 log = logging.getLogger('builder')
 
-def get_docker_namespace(path):
+def tokenize(string):
+    return re.split('\s+', string)
+
+def valid_docker_namespace(string):
+    # [a-z0-9-_]{4,30} docker v1.5.0
+    return string.lstrip('*').split('/')[-1].strip().lower()[:30]
+
+def get_docker_namespace_from_git(path):
     git_dir = os.path.join(path, '.git')
 
     if os.path.exists(git_dir) and os.path.isdir(git_dir):
@@ -30,10 +37,9 @@ def get_docker_namespace(path):
 
         for line in out.decode().strip().split('\n'):
             if line.startswith('*'):
-                # [a-z0-9-_]{4,30} docker v1.5.0
-                return line.lstrip('*').split('/')[-1].strip().lower()[:30]
+                return valid_docker_namespace(line)
 
-        return os.path.split(path)[1].strip()
+        return valid_docker_namespace(os.path.split(path)[1].strip())
 
 def get_docker_images(name, tag = None):
     proc = subprocess.Popen(['docker', 'images'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -43,9 +49,6 @@ def get_docker_images(name, tag = None):
         log.error(err.decode())
 
     lines = out.decode().strip().split('\n')
-
-    def tokenize(string):
-        return re.split('\s+', string)
 
     keys = tokenize(lines[0])
 
@@ -63,23 +66,28 @@ def get_docker_images(name, tag = None):
 @click.command(context_settings=CONTEXT_SETTINGS)
 @click.option('--version', required=True)
 @click.option('-r', '--docker-repo', required=True)
+@click.option('-n', '--docker-namespace')
 @click.option('-t', '--test/--no-test', default=True)
 @click.option('-c', '--compile/--no-compile', default=True)
 @click.option('-b', '--build/--no-build', default=True)
 @click.option('-u', '--upload/--no-upload', default=True)
 @click.argument('path', default=os.getcwd())
-def cli(docker_repo, test, compile, build, upload, version, path):
+def cli(docker_repo, docker_namespace, test, compile, build, upload, version, path):
     repo_path = os.path.abspath(path)
 
-    namespace = get_docker_namespace(repo_path)
+    namespace = get_docker_namespace_from_git(repo_path) if docker_namespace is None else valid_docker_namespace(docker_namespace)
 
     errors = 0
+
+    # TODO move this to class Builder
 
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [ d for d in dirs if d not in ['.git'] ]
 
         if not 'Dockerfile' in files:
             continue
+
+        log.debug('found Docker file in %s', root)
 
         os.chdir(root)
 
@@ -92,7 +100,7 @@ def cli(docker_repo, test, compile, build, upload, version, path):
                     errors += 1
                     continue
             else:
-                log.warn('not test script found for: %s', project_name)
+                log.warn('no test script found for: %s', project_name)
 
         if compile:
             if 'compile' in files:
