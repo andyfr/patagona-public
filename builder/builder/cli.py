@@ -79,6 +79,8 @@ def cli(docker_repo, docker_namespace, test, compile, build, upload, version, pa
 
     namespace = get_docker_namespace_from_git(repo_path) if docker_namespace is None else valid_docker_namespace(docker_namespace)
 
+    log.debug('chose "%s" as namespace (docker_namespace was "%s", path was "%s")', namespace, docker_namespace, path)
+
     errors = 0
 
     # TODO move this to class Builder
