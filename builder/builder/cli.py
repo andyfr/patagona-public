@@ -9,7 +9,7 @@
 
 """
 
-import click, os, subprocess, logging
+import click, os, subprocess, logging, re
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
@@ -34,6 +34,31 @@ def get_docker_namespace(path):
                 return line.lstrip('*').split('/')[-1].strip().lower()[:30]
 
         return os.path.split(path)[1].strip()
+
+def get_docker_images(name, tag = None):
+    proc = subprocess.Popen(['docker', 'images'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate()
+
+    if err.decode() != '':
+        log.error(err.decode())
+
+    lines = out.decode().strip().split('\n')
+
+    def tokenize(string):
+        return re.split('\s+', string)
+
+    keys = tokenize(lines[0])
+
+    images = []
+
+    for line in lines[1:]:
+        if name in line:
+            if tag and tag not in line:
+                continue
+
+            images.append(dict(zip(keys, tokenize(line))))
+
+    return images
 
 @click.command(context_settings=CONTEXT_SETTINGS)
 @click.option('--version', required=True)
@@ -89,10 +114,24 @@ def cli(docker_repo, test, compile, build, upload, version, path):
                 errors += 1
                 continue
 
-            if upload and subprocess.call('docker push "{repo}"'.format(repo = tag), shell=True) != 0:
-                log.error('failed to push docker image for: %s', project_name)
+            if upload and subprocess.call('docker push "{tag}"'.format(tag = tag), shell=True) != 0:
+                log.error('failed to push docker image (as %s) for: %s', version, project_name)
                 errors += 1
                 continue
+
+            image_id = get_docker_images(tag, version)[0]['IMAGE']
+
+            if subprocess.call('docker tag -f {image} "{tag}:latest"'.format(tag = tag, image = image_id), shell=True) != 0:
+                log.error('failed to tag docker image as latest for: %s', project_name)
+                errors += 1
+                continue
+
+            if subprocess.call('docker push "{tag}:latest"'.format(tag = tag), shell=True) != 0:
+                log.error('failed to push docker image (as latest) for: %s', project_name)
+                errors += 1
+                continue
+
+            # TODO remove created image
 
     exit(errors)
 

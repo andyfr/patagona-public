@@ -16,7 +16,7 @@ install_reqs = pip.req.parse_requirements('requirements.txt', session=pip.downlo
 requirements = [str(ir.req) for ir in install_reqs if ir is not None]
 
 setup(name             = 'builder',
-      version          = '0.1',
+      version          = '0.0.1',
       author           = 'Patagona GmbH',
       author_email     = 'developers@gmail.com',
       description      = 'builder for dockerizable projects',
