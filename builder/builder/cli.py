@@ -73,6 +73,8 @@ def get_docker_images(name, tag = None):
 @click.option('-u', '--upload/--no-upload', default=True)
 @click.argument('path', default=os.getcwd())
 def cli(docker_repo, docker_namespace, test, compile, build, upload, version, path):
+    logging.basicConfig(format="%(asctime)s [%(levelname)s] - %(name)s: %(message)s")
+
     repo_path = os.path.abspath(path)
 
     namespace = get_docker_namespace_from_git(repo_path) if docker_namespace is None else valid_docker_namespace(docker_namespace)
