@@ -67,13 +67,15 @@ def get_docker_images(name, tag = None):
 @click.option('--version', required=True)
 @click.option('-r', '--docker-repo', required=True)
 @click.option('-n', '--docker-namespace')
+@click.option('-d', '--debug/--no-debug', default=True)
 @click.option('-t', '--test/--no-test', default=True)
 @click.option('-c', '--compile/--no-compile', default=True)
 @click.option('-b', '--build/--no-build', default=True)
 @click.option('-u', '--upload/--no-upload', default=True)
 @click.argument('path', default=os.getcwd())
-def cli(docker_repo, docker_namespace, test, compile, build, upload, version, path):
-    logging.basicConfig(format="%(asctime)s [%(levelname)s] - %(name)s: %(message)s")
+def cli(docker_repo, docker_namespace, debug, test, compile, build, upload, version, path):
+    loglevel = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(level=loglevel, format="%(asctime)s [%(levelname)s] - %(name)s: %(message)s")
 
     repo_path = os.path.abspath(path)
 
