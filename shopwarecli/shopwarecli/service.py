@@ -9,7 +9,7 @@
 
 """
 
-import requests, json, os
+import requests, json, os, logging
 
 class Service:
     def __init__(self, host, user, password, version):
@@ -66,15 +66,14 @@ class Service:
     def delete(self, path, accept = 200, data = None, files = None, headers = {}):
         return self.request(requests.delete, path, accept=accept, data=data, files=files, headers=headers)
 
-    def _format_(self, string, pretty):
+    def _format_(self, arg, pretty):
         if pretty:
-            return self.pretty(string)
+            return self.pretty(arg)
         else:
-            return string
+            return arg
 
     def article_count(self):
-        result = self.articles(start=0, stop=0, limit=0, detail=False, pretty=False)[0]['total']
-        return int(result)
+        return int(self.get('articles?limit=0')['total'])
 
     def article(self, article_id, pretty):
         result = self.get('articles/{id}'.format(id=article_id))
@@ -86,8 +85,13 @@ class Service:
 
         articles = []
 
+        logging.warn('requesting %s (start=%s, stop=%s) articles with limit %s', (stop - start), start, stop, limit)
+
         while start <= stop:
-            articles.append(self.get('articles?limit={limit}&start={start}'.format(limit=limit, start=start)))
+            result = self.get('articles?limit={limit}&start={start}'.format(limit=limit, start=start))['data']
+            articles.extend(result)
+
+            logging.debug('got %s articles', len(result))
 
             if limit == 0:
                 break
@@ -95,9 +99,13 @@ class Service:
             start += limit
 
         if detail:
+            logging.warn('looking up detail information on %s articles', len(articles))
+
             detailed_articles = []
+
             for article in articles:
-                detailed_articles.append(self.article(article['data'][0]['id'], pretty=False))
+                detailed_articles.append(self.article(article['id'], pretty=False))
+
             return self._format_(detailed_articles, pretty)
 
         return self._format_(articles, pretty)

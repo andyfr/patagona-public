@@ -38,17 +38,55 @@ def article(ctx, article_id):
 
 @cli.command()
 @click.option('-d', '--detail/--no-detail', default=False)
-@click.option('-l', '--limit', default=100)
+@click.option('-l', '--limit', default=500)
+@click.option('--csv', multiple=True)
 @click.argument('start', required=False, default=0)
 @click.argument('stop', required=False, default=-1)
 @click.pass_context
-def articles(ctx, detail, limit, start, stop):
+def articles(ctx, detail, limit, csv, start, stop):
     service = ctx.obj['service']
 
-    print(service.articles(start, stop, limit, detail, ctx.obj['pretty']))
+    articles = service.articles(start, stop, limit, detail, ctx.obj['pretty'])
+
+    if csv is not None and csv != ():
+        # import csv
+        #
+        # csv_file = open('output.csv', 'w')
+        #
+        # try:
+        #     writer = csv.DictWriter(csv_file, ['gtin', 'name', 'price'])
+        #     writer.writeheader()
+        #
+        #     counter = 0
+        #
+        #     for article in getArticles(args.url, USER, TOKEN, limit=100, get_all=True):
+        #     # for article in getArticles(args.url, USER, TOKEN, limit=5):
+        #         counter += 1
+        #         gtin = article['mainDetail']['ean']
+        #         name = article['name']
+        #
+        #         for price in article['mainDetail']['prices']:
+        #             if price['customerGroupKey'] == 'EK':
+        #                 price = price['price']
+        #             else:
+        #                 price = '!NO_EK_CG!'
+        #
+        #         article = {'gtin': gtin,
+        #                    'name': name,
+        #                    'price': price
+        #                   }
+        #
+        #         print('%s: %s' % (counter, name))
+        #
+        #         writer.writerow(article)
+        # finally:
+        #     csv_file.close()
+        raise NotImplementedError
+    else:
+        print(articles)
 
 def run():
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.WARN)
     cli(obj={})
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4 fenc=utf-8
