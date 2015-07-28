@@ -63,6 +63,57 @@ def get_docker_images(name, tag = None):
 
     return images
 
+def build_container(docker_repo, directory, test, compile, build, upload, version, name, namespace):
+    cwd = os.getcwd()
+
+    os.chdir(directory)
+
+    for root, dirs, files in os.walk(directory):
+        if test:
+            if 'test' in files:
+                if subprocess.call('./test') != 0:
+                    log.error('failed to run tests for project: %s', name)
+                    return False
+            else:
+                log.warn('no test script found for: %s', name)
+
+        if compile:
+            if 'compile' in files:
+                if subprocess.call('./compile') != 0:
+                    log.error('failed to build project: %s', name)
+                    return False
+            else:
+                log.warn('no compile script found for: %s', name)
+
+        if build:
+            tag = '{docker}/{repo}/{project}'.format(
+                    docker = docker_repo,
+                    repo = namespace,
+                    project = name)
+
+            if subprocess.call('docker build -t "{tag}:{version}" .'.format(tag = tag, version = version), shell=True) != 0:
+                log.error('failed to build docker image for: %s', name)
+                return False
+
+            if upload and subprocess.call('docker push "{tag}"'.format(tag = tag), shell=True) != 0:
+                log.error('failed to push docker image (as %s) for: %s', version, name)
+                return False
+
+                image_id = get_docker_images(tag, version)[0]['IMAGE']
+
+                if subprocess.call('docker tag -f {image} "{tag}:latest"'.format(tag = tag, image = image_id), shell=True) != 0:
+                    log.error('failed to tag docker image as latest for: %s', name)
+                    return False
+
+                if subprocess.call('docker push "{tag}:latest"'.format(tag = tag), shell=True) != 0:
+                    log.error('failed to push docker image (as latest) for: %s', name)
+                    return False
+        break
+
+    os.chdir(cwd)
+
+    return True
+
 @click.command(context_settings=CONTEXT_SETTINGS)
 @click.option('--version', required=True)
 @click.option('-r', '--docker-repo', required=True)
@@ -72,78 +123,49 @@ def get_docker_images(name, tag = None):
 @click.option('-c', '--compile/--no-compile', default=True)
 @click.option('-b', '--build/--no-build', default=True)
 @click.option('-u', '--upload/--no-upload', default=True)
-@click.argument('path', default=os.getcwd())
-def cli(docker_repo, docker_namespace, debug, test, compile, build, upload, version, path):
+@click.option('--name')
+@click.argument('path')
+def cli(docker_repo, docker_namespace, debug, test, compile, build, upload, version, name, path):
     loglevel = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(level=loglevel, format="%(asctime)s [%(levelname)s] - %(name)s: %(message)s")
 
-    repo_path = os.path.abspath(path)
+    abs_path = os.path.abspath(path)
 
-    namespace = get_docker_namespace_from_git(repo_path) if docker_namespace is None else valid_docker_namespace(docker_namespace)
+    if docker_namespace is None:
+        namespace = get_docker_namespace_from_git(abs_path)
+    else:
+        namespace = valid_docker_namespace(docker_namespace)
 
-    log.debug('chose "%s" as namespace (docker_namespace was "%s", path was "%s")', namespace, docker_namespace, path)
+    log.debug('chose "%s" as namespace (docker_namespace was "%s", path was "%s")', namespace, docker_namespace, abs_path)
 
     errors = 0
 
     # TODO move this to class Builder
 
-    for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [ d for d in dirs if d not in ['.git'] ]
+    cwd = os.getcwd()
 
-        if not 'Dockerfile' in files:
-            continue
-
-        log.debug('found Docker file in %s', root)
-
-        os.chdir(root)
-
-        project_name = os.path.split(root)[1]
-
-        if test:
-            if 'test' in files:
-                if subprocess.call('./test') != 0:
-                    log.error('failed to run tests for project: %s', project_name)
-                    errors += 1
-                    continue
-            else:
-                log.warn('no test script found for: %s', project_name)
-
-        if compile:
-            if 'compile' in files:
-                if subprocess.call('./compile') != 0:
-                    log.error('failed to build project: %s', project_name)
-                    errors += 1
-                    continue
-            else:
-                log.warn('no compile script found for: %s', project_name)
-
-        if build:
-            tag = '{docker}/{repo}/{project}'.format(
-                    docker = docker_repo,
-                    repo = namespace,
-                    project = project_name)
-
-            if subprocess.call('docker build -t "{tag}:{version}" .'.format(tag = tag, version = version), shell=True) != 0:
-                log.error('failed to build docker image for: %s', project_name)
+    if name is not None:
+        if os.path.exists(os.path.join(abs_path, "Dockerfile")):
+            if not build_container(docker_repo, abs_path, test, compile, build, upload, version, name, namespace):
                 errors += 1
+                log.error('failed to build container for %s with name %s and namespace %s', abs_path, name, namespace)
+        else:
+            log.error()
+    else:
+        for root, dirs, files in os.walk(abs_path):
+            dirs[:] = [ d for d in dirs if d not in ['.git'] ]
+
+            if not 'Dockerfile' in files:
                 continue
 
-            if upload and subprocess.call('docker push "{tag}"'.format(tag = tag), shell=True) != 0:
-                log.error('failed to push docker image (as %s) for: %s', version, project_name)
-                errors += 1
-                continue
+            log.debug('found Docker file in %s', root)
 
-            image_id = get_docker_images(tag, version)[0]['IMAGE']
+            name = os.path.split(root)[1]
 
-            if subprocess.call('docker tag -f {image} "{tag}:latest"'.format(tag = tag, image = image_id), shell=True) != 0:
-                log.error('failed to tag docker image as latest for: %s', project_name)
-                errors += 1
-                continue
+            log.warn('using name "%s" for container in directory %s', name, root)
 
-            if subprocess.call('docker push "{tag}:latest"'.format(tag = tag), shell=True) != 0:
-                log.error('failed to push docker image (as latest) for: %s', project_name)
-                errors += 1
-                continue
+            if not build_container(docker_repo, root, test, compile, build, upload, version, name, namespace):
+                log.error('failed to build container for %s with name %s and namespace %s', root, name, namespace)
 
             # TODO remove created image
 
