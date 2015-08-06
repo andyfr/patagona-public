@@ -64,6 +64,8 @@ def get_docker_images(name, tag = None):
     return images
 
 def build_container(docker_repo, directory, test, compile, build, upload, version, name, namespace):
+    # TODO split this up
+
     cwd = os.getcwd()
 
     os.chdir(directory)
@@ -91,21 +93,30 @@ def build_container(docker_repo, directory, test, compile, build, upload, versio
                     repo = namespace,
                     project = name)
 
+            log.info('tagging image as {tag}:{version}'.format(tag = tag, version = version))
+
             if subprocess.call('docker build -t "{tag}:{version}" .'.format(tag = tag, version = version), shell=True) != 0:
                 log.error('failed to build docker image for: %s', name)
                 return False
 
-            if upload and subprocess.call('docker push "{tag}"'.format(tag = tag), shell=True) != 0:
-                log.error('failed to push docker image (as %s) for: %s', version, name)
-                return False
+            log.info('pushing image')
+
+            if upload:
+                if subprocess.call('docker push "{tag}"'.format(tag = tag), shell=True) != 0:
+                    log.error('failed to push docker image (as %s) for: %s', version, name)
+                    return False
 
                 image_id = get_docker_images(tag, version)[0]['IMAGE']
+
+                log.info('tagging image as {tag}:latest'.format(tag = tag, version = version))
 
                 if subprocess.call('docker tag -f {image} "{tag}:latest"'.format(tag = tag, image = image_id), shell=True) != 0:
                     log.error('failed to tag docker image as latest for: %s', name)
                     return False
 
-                if subprocess.call('docker push "{tag}:latest"'.format(tag = tag), shell=True) != 0:
+                log.info('pushing image')
+
+                if subprocess.call('docker push "{tag}"'.format(tag = tag), shell=True) != 0:
                     log.error('failed to push docker image (as latest) for: %s', name)
                     return False
         break
