@@ -22,12 +22,12 @@ def valid_docker_namespace(string):
     # [a-z0-9-_]{4,30} docker v1.5.0
     return string.lstrip('*').split('/')[-1].strip().lower()[:30]
 
-def get_docker_namespace_from_git(path):
-    git_dir = os.path.join(path, '.git')
+def get_docker_namespace_from_git(git_root):
+    git_dir = os.path.join(git_root, '.git')
 
     if os.path.exists(git_dir) and os.path.isdir(git_dir):
         proc = subprocess.Popen(
-                ['git', '--git-dir=%s' % git_dir, '--work-tree=%s' % path, 'branch'],
+                ['git', '--git-dir=%s' % git_dir, '--work-tree=%s' % git_root, 'branch'],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         out, err = proc.communicate()
@@ -37,9 +37,40 @@ def get_docker_namespace_from_git(path):
 
         for line in out.decode().strip().split('\n'):
             if line.startswith('*'):
-                return valid_docker_namespace(line)
+                return line
 
-        return valid_docker_namespace(os.path.split(path)[1].strip())
+    return os.path.split(git_root)[1].strip()
+
+def get_git_root(directory):
+    cwd = os.getcwd()
+    os.chdir(directory)
+
+    proc = subprocess.Popen('git rev-parse --show-toplevel', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    out, err = proc.communicate()
+
+    if proc.returncode != 0:
+        raise Exception("not in a git tree: %s" % directory)
+
+    os.chdir(cwd)
+
+    return out.decode().strip()
+
+def get_changed_dirs(git_root):
+    cwd = os.getcwd()
+    os.chdir(git_root)
+
+    proc = subprocess.Popen(
+            "git --no-pager diff --name-only HEAD^ | cut -d'/' -f1 | uniq",
+            shell = True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+    out, err = proc.communicate()
+
+    os.chdir(cwd)
+
+    return out.decode().strip().split('\n')
 
 def get_docker_images(name, tag = None):
     proc = subprocess.Popen(['docker', 'images'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -65,9 +96,9 @@ def get_docker_images(name, tag = None):
 
 def build_container(docker_repo, directory, test, compile, build, upload, version, name, namespace):
     # TODO split this up
+    log.info('building docker image in %s', directory)
 
     cwd = os.getcwd()
-
     os.chdir(directory)
 
     for root, dirs, files in os.walk(directory):
@@ -77,7 +108,7 @@ def build_container(docker_repo, directory, test, compile, build, upload, versio
                     log.error('failed to run tests for project: %s', name)
                     return False
             else:
-                log.warn('no test script found for: %s', name)
+                log.warning('no test script found for: %s', name)
 
         if compile:
             if 'compile' in files:
@@ -85,7 +116,7 @@ def build_container(docker_repo, directory, test, compile, build, upload, versio
                     log.error('failed to build project: %s', name)
                     return False
             else:
-                log.warn('no compile script found for: %s', name)
+                log.warning('no compile script found for: %s', name)
 
         if build:
             tag = '{docker}/{repo}/{project}'.format(
@@ -99,9 +130,9 @@ def build_container(docker_repo, directory, test, compile, build, upload, versio
                 log.error('failed to build docker image for: %s', name)
                 return False
 
-            log.info('pushing image')
-
             if upload:
+                log.info('pushing image')
+
                 if subprocess.call('docker push "{tag}"'.format(tag = tag), shell=True) != 0:
                     log.error('failed to push docker image (as %s) for: %s', version, name)
                     return False
@@ -125,8 +156,31 @@ def build_container(docker_repo, directory, test, compile, build, upload, versio
 
     return True
 
+def build_all_docker_images(docker_repo, directory, test, compile, build, upload, version, name, namespace):
+    log.info('looking for dockerfiles in %s', directory)
+
+    errors = 0
+
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [ d for d in dirs if d not in ['.git'] ]
+
+        if not 'Dockerfile' in files:
+            log.debug('no dockerfile found in %s', root)
+            continue
+
+        log.debug('found Docker file in %s', root)
+
+        name = os.path.split(root)[1]
+
+        log.info('using name "%s" for container in directory %s', name, root)
+
+        if not build_container(docker_repo, root, test, compile, build, upload, version, name, namespace):
+            log.error('failed to build container for %s with name %s and namespace %s', root, name, namespace)
+            errors += 1
+
+    return errors
+
 @click.command(context_settings=CONTEXT_SETTINGS)
-@click.option('--version', required=True)
 @click.option('-r', '--docker-repo', required=True)
 @click.option('-n', '--docker-namespace')
 @click.option('-d', '--debug/--no-debug', default=True)
@@ -134,51 +188,53 @@ def build_container(docker_repo, directory, test, compile, build, upload, versio
 @click.option('-c', '--compile/--no-compile', default=True)
 @click.option('-b', '--build/--no-build', default=True)
 @click.option('-u', '--upload/--no-upload', default=True)
+@click.option('-A', '--only-changed/--all', default=True)
+@click.option('--version', required=True)
 @click.option('--name')
 @click.argument('path')
-def cli(docker_repo, docker_namespace, debug, test, compile, build, upload, version, name, path):
+def cli(docker_repo, docker_namespace, debug, test, compile, build, upload, only_changed, version, name, path):
     loglevel = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(level=loglevel, format="%(asctime)s [%(levelname)s] - %(name)s: %(message)s")
 
     abs_path = os.path.abspath(path)
 
-    if docker_namespace is None:
-        namespace = get_docker_namespace_from_git(abs_path)
-    else:
+    if docker_namespace is not None:
         namespace = valid_docker_namespace(docker_namespace)
+    else:
+        namespace = valid_docker_namespace(get_docker_namespace_from_git(abs_path))
 
     log.debug('chose "%s" as namespace (docker_namespace was "%s", path was "%s")', namespace, docker_namespace, abs_path)
 
     errors = 0
 
-    # TODO move this to class Builder
-
     cwd = os.getcwd()
 
     if name is not None:
+        log.info('building %s', abs_path)
+
+        os.path.join(abs_path, "Dockerfile")
         if os.path.exists(os.path.join(abs_path, "Dockerfile")):
             if not build_container(docker_repo, abs_path, test, compile, build, upload, version, name, namespace):
                 errors += 1
                 log.error('failed to build container for %s with name %s and namespace %s', abs_path, name, namespace)
         else:
             log.error()
+    elif only_changed:
+        log.info('building changed directories in %s', abs_path)
+
+        git_root = get_git_root(abs_path)
+
+        changed_dirs = get_changed_dirs(git_root)
+
+        for d in changed_dirs:
+            if d is not None and d != '':
+                errors += build_all_docker_images(docker_repo, os.path.join(git_root, d), test, compile, build, upload, version, name, namespace)
     else:
-        for root, dirs, files in os.walk(abs_path):
-            dirs[:] = [ d for d in dirs if d not in ['.git'] ]
+        log.info('building all directories in %s', abs_path)
 
-            if not 'Dockerfile' in files:
-                continue
+        errors += build_all_docker_images(docker_repo, abs_path, test, compile, build, upload, version, name, namespace)
 
-            log.debug('found Docker file in %s', root)
-
-            name = os.path.split(root)[1]
-
-            log.warn('using name "%s" for container in directory %s', name, root)
-
-            if not build_container(docker_repo, root, test, compile, build, upload, version, name, namespace):
-                log.error('failed to build container for %s with name %s and namespace %s', root, name, namespace)
-
-            # TODO remove created image
+    # TODO remove created image
 
     exit(errors)
 
