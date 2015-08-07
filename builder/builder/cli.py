@@ -22,6 +22,21 @@ def valid_docker_namespace(string):
     # [a-z0-9-_]{4,30} docker v1.5.0
     return string.lstrip('*').split('/')[-1].strip().lower()[:30]
 
+def get_git_root(directory):
+    cwd = os.getcwd()
+    os.chdir(directory)
+
+    proc = subprocess.Popen('git rev-parse --show-toplevel', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    out, err = proc.communicate()
+
+    if proc.returncode != 0:
+        raise Exception("not in a git tree: %s" % directory)
+
+    os.chdir(cwd)
+
+    return out.decode().strip()
+
 def get_docker_namespace_from_git(git_root):
     git_dir = os.path.join(git_root, '.git')
 
@@ -40,21 +55,6 @@ def get_docker_namespace_from_git(git_root):
                 return line
 
     return os.path.split(git_root)[1].strip()
-
-def get_git_root(directory):
-    cwd = os.getcwd()
-    os.chdir(directory)
-
-    proc = subprocess.Popen('git rev-parse --show-toplevel', shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    out, err = proc.communicate()
-
-    if proc.returncode != 0:
-        raise Exception("not in a git tree: %s" % directory)
-
-    os.chdir(cwd)
-
-    return out.decode().strip()
 
 def get_changed_dirs(git_root):
     cwd = os.getcwd()
@@ -183,7 +183,7 @@ def build_all_docker_images(docker_repo, directory, test, compile, build, upload
 @click.command(context_settings=CONTEXT_SETTINGS)
 @click.option('-r', '--docker-repo', required=True)
 @click.option('-n', '--docker-namespace')
-@click.option('-d', '--debug/--no-debug', default=True)
+@click.option('-d', '--debug/--no-debug', default=False)
 @click.option('-t', '--test/--no-test', default=True)
 @click.option('-c', '--compile/--no-compile', default=True)
 @click.option('-b', '--build/--no-build', default=True)
@@ -201,7 +201,8 @@ def cli(docker_repo, docker_namespace, debug, test, compile, build, upload, only
     if docker_namespace is not None:
         namespace = valid_docker_namespace(docker_namespace)
     else:
-        namespace = valid_docker_namespace(get_docker_namespace_from_git(abs_path))
+        git_root = get_git_root(abs_path)
+        namespace = valid_docker_namespace(get_docker_namespace_from_git(git_root))
 
     log.debug('chose "%s" as namespace (docker_namespace was "%s", path was "%s")', namespace, docker_namespace, abs_path)
 
